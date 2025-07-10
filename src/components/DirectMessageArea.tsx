@@ -67,7 +67,17 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
       const messageData = message.data;
       // Only add messages from other user, not own messages
       if (messageData.senderId !== currentUser.id) {
-        setMessages((prev) => [...prev, messageData]);
+        setMessages((prev) => {
+          // Check if message already exists to prevent duplicates
+          const exists = prev.some(msg => 
+            msg.id === messageData.id || 
+            (msg.senderId === messageData.senderId && 
+             msg.message === messageData.message && 
+             Math.abs(new Date(msg.timestamp).getTime() - new Date(messageData.timestamp).getTime()) < 1000)
+          );
+          if (exists) return prev;
+          return [...prev, messageData];
+        });
       }
     });
 
@@ -115,8 +125,17 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
       const data = await response.json();
       
       if (response.ok) {
-        // Add own message locally immediately
-        setMessages((prev) => [...prev, data.directMessage]);
+        // Add own message locally immediately with duplicate check
+        setMessages((prev) => {
+          const exists = prev.some(msg => 
+            msg.id === data.directMessage.id || 
+            (msg.senderId === data.directMessage.senderId && 
+             msg.message === data.directMessage.message && 
+             Math.abs(new Date(msg.timestamp).getTime() - new Date(data.directMessage.timestamp).getTime()) < 1000)
+          );
+          if (exists) return prev;
+          return [...prev, data.directMessage];
+        });
         
         // Broadcast to other user via Ably
         const channelName = `dm-${Math.min(currentUser.id, otherUser.id)}-${Math.max(currentUser.id, otherUser.id)}`;

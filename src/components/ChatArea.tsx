@@ -72,7 +72,17 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       const messageData = message.data;
       // Only add messages from other users, not own messages
       if (messageData.senderId !== currentUser.id) {
-        setMessages((prev) => [...prev, messageData]);
+        setMessages((prev) => {
+          // Check if message already exists to prevent duplicates
+          const exists = prev.some(msg => 
+            msg.id === messageData.id || 
+            (msg.senderId === messageData.senderId && 
+             msg.message === messageData.message && 
+             Math.abs(new Date(msg.timestamp).getTime() - new Date(messageData.timestamp).getTime()) < 1000)
+          );
+          if (exists) return prev;
+          return [...prev, messageData];
+        });
       }
     });
 
@@ -120,8 +130,17 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       const data = await response.json();
       
       if (response.ok) {
-        // Add own message locally immediately
-        setMessages((prev) => [...prev, data.message]);
+        // Add own message locally immediately with duplicate check
+        setMessages((prev) => {
+          const exists = prev.some(msg => 
+            msg.id === data.message.id || 
+            (msg.senderId === data.message.senderId && 
+             msg.message === data.message.message && 
+             Math.abs(new Date(msg.timestamp).getTime() - new Date(data.message.timestamp).getTime()) < 1000)
+          );
+          if (exists) return prev;
+          return [...prev, data.message];
+        });
         
         // Broadcast to others via Ably
         const channel = ably.channels.get(`chat-${activeRoom.id}`);
