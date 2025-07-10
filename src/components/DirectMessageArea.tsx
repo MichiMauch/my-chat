@@ -1,11 +1,13 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { User, Send } from 'lucide-react';
-import ably from '@/lib/ably';
-import EmojiPickerComponent from './EmojiPicker';
-import FileUpload from './FileUpload';
-import FileMessage from './FileMessage';
+import { useState, useEffect, useRef } from "react";
+import { User, Send } from "lucide-react";
+import ably from "@/lib/ably";
+import EmojiPickerComponent from "./EmojiPicker";
+import FileUpload from "./FileUpload";
+import FileMessage from "./FileMessage";
+import DragDropZone from "./DragDropZone";
+import FilePreview from "./FilePreview";
 
 interface CurrentUser {
   id: number;
@@ -32,11 +34,16 @@ interface DirectMessageAreaProps {
   otherUser: CurrentUser;
 }
 
-export default function DirectMessageArea({ currentUser, otherUser }: DirectMessageAreaProps) {
+export default function DirectMessageArea({
+  currentUser,
+  otherUser,
+}: DirectMessageAreaProps) {
   const [messages, setMessages] = useState<DirectMessage[]>([]);
-  const [newMessage, setNewMessage] = useState('');
+  const [newMessage, setNewMessage] = useState("");
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [draggedFile, setDraggedFile] = useState<File | null>(null);
+  const [isUploadingDraggedFile, setIsUploadingDraggedFile] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -51,14 +58,16 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
 
   const loadMessages = async () => {
     if (!otherUser) return;
-    
+
     setLoading(true);
     try {
-      const response = await fetch(`/api/direct-messages?userId=${currentUser.id}&otherUserId=${otherUser.id}`);
+      const response = await fetch(
+        `/api/direct-messages?userId=${currentUser.id}&otherUserId=${otherUser.id}`
+      );
       const data = await response.json();
       setMessages(data.messages || []);
     } catch (error) {
-      console.error('Failed to load direct messages:', error);
+      console.error("Failed to load direct messages:", error);
     } finally {
       setLoading(false);
     }
@@ -67,20 +76,27 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
   const setupAbly = () => {
     if (!otherUser) return;
 
-    const channelName = `dm-${Math.min(currentUser.id, otherUser.id)}-${Math.max(currentUser.id, otherUser.id)}`;
+    const channelName = `dm-${Math.min(
+      currentUser.id,
+      otherUser.id
+    )}-${Math.max(currentUser.id, otherUser.id)}`;
     const channel = ably.channels.get(channelName);
-    
-    channel.subscribe('message', (message) => {
+
+    channel.subscribe("message", (message) => {
       const messageData = message.data;
       // Only add messages from other user, not own messages
       if (messageData.senderId !== currentUser.id) {
         setMessages((prev) => {
           // Check if message already exists to prevent duplicates
-          const exists = prev.some(msg => 
-            msg.id === messageData.id || 
-            (msg.senderId === messageData.senderId && 
-             msg.message === messageData.message && 
-             Math.abs(new Date(msg.timestamp).getTime() - new Date(messageData.timestamp).getTime()) < 1000)
+          const exists = prev.some(
+            (msg) =>
+              msg.id === messageData.id ||
+              (msg.senderId === messageData.senderId &&
+                msg.message === messageData.message &&
+                Math.abs(
+                  new Date(msg.timestamp).getTime() -
+                    new Date(messageData.timestamp).getTime()
+                ) < 1000)
           );
           if (exists) return prev;
           return [...prev, messageData];
@@ -88,11 +104,11 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
       }
     });
 
-    channel.subscribe('typing', (message) => {
+    channel.subscribe("typing", (message) => {
       const { username, isTyping } = message.data;
-      
+
       if (username === currentUser.username) return;
-      
+
       setTypingUsers((prev) => {
         const newSet = new Set(prev);
         if (isTyping) {
@@ -114,13 +130,13 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
     if (!newMessage.trim() || !otherUser) return;
 
     const messageText = newMessage.trim();
-    setNewMessage('');
+    setNewMessage("");
 
     try {
-      const response = await fetch('/api/direct-messages', {
-        method: 'POST',
+      const response = await fetch("/api/direct-messages", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           senderId: currentUser.id,
@@ -130,39 +146,49 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
       });
 
       const data = await response.json();
-      
+
       if (response.ok) {
         // Add own message locally immediately with duplicate check
         setMessages((prev) => {
-          const exists = prev.some(msg => 
-            msg.id === data.directMessage.id || 
-            (msg.senderId === data.directMessage.senderId && 
-             msg.message === data.directMessage.message && 
-             Math.abs(new Date(msg.timestamp).getTime() - new Date(data.directMessage.timestamp).getTime()) < 1000)
+          const exists = prev.some(
+            (msg) =>
+              msg.id === data.directMessage.id ||
+              (msg.senderId === data.directMessage.senderId &&
+                msg.message === data.directMessage.message &&
+                Math.abs(
+                  new Date(msg.timestamp).getTime() -
+                    new Date(data.directMessage.timestamp).getTime()
+                ) < 1000)
           );
           if (exists) return prev;
           return [...prev, data.directMessage];
         });
-        
+
         // Broadcast to other user via Ably
-        const channelName = `dm-${Math.min(currentUser.id, otherUser.id)}-${Math.max(currentUser.id, otherUser.id)}`;
+        const channelName = `dm-${Math.min(
+          currentUser.id,
+          otherUser.id
+        )}-${Math.max(currentUser.id, otherUser.id)}`;
         const channel = ably.channels.get(channelName);
-        channel.publish('message', data.directMessage);
+        channel.publish("message", data.directMessage);
       }
     } catch (error) {
-      console.error('Failed to send direct message:', error);
+      console.error("Failed to send direct message:", error);
       setNewMessage(messageText);
     }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value);
-    
+
     if (!otherUser) return;
-    
-    const channelName = `dm-${Math.min(currentUser.id, otherUser.id)}-${Math.max(currentUser.id, otherUser.id)}`;
+
+    const channelName = `dm-${Math.min(
+      currentUser.id,
+      otherUser.id
+    )}-${Math.max(currentUser.id, otherUser.id)}`;
     const channel = ably.channels.get(channelName);
-    channel.publish('typing', {
+    channel.publish("typing", {
       username: currentUser.username,
       isTyping: true,
     });
@@ -172,7 +198,7 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
     }
 
     typingTimeoutRef.current = setTimeout(() => {
-      channel.publish('typing', {
+      channel.publish("typing", {
         username: currentUser.username,
         isTyping: false,
       });
@@ -180,7 +206,7 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
   };
 
   const handleEmojiSelect = (emoji: string) => {
-    setNewMessage(prev => prev + emoji);
+    setNewMessage((prev) => prev + emoji);
     // Refocus the input after emoji selection
     setTimeout(() => {
       if (inputRef.current) {
@@ -198,15 +224,15 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
     if (!otherUser) return;
 
     try {
-      const response = await fetch('/api/direct-messages', {
-        method: 'POST',
+      const response = await fetch("/api/direct-messages", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           senderId: currentUser.id,
           receiverId: otherUser.id,
-          message: '',
+          message: "",
           fileName: fileInfo.fileName,
           fileUrl: fileInfo.fileUrl,
           fileType: fileInfo.fileType,
@@ -215,32 +241,122 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
       });
 
       const data = await response.json();
-      
+
       if (response.ok) {
         // Add own message locally immediately with duplicate check
         setMessages((prev) => {
-          const exists = prev.some(msg => 
-            msg.id === data.directMessage.id || 
-            (msg.senderId === data.directMessage.senderId && 
-             msg.file_url === data.directMessage.file_url && 
-             Math.abs(new Date(msg.timestamp).getTime() - new Date(data.directMessage.timestamp).getTime()) < 1000)
+          const exists = prev.some(
+            (msg) =>
+              msg.id === data.directMessage.id ||
+              (msg.senderId === data.directMessage.senderId &&
+                msg.file_url === data.directMessage.file_url &&
+                Math.abs(
+                  new Date(msg.timestamp).getTime() -
+                    new Date(data.directMessage.timestamp).getTime()
+                ) < 1000)
           );
           if (exists) return prev;
           return [...prev, data.directMessage];
         });
-        
+
         // Broadcast to other user via Ably
-        const channelName = `dm-${Math.min(currentUser.id, otherUser.id)}-${Math.max(currentUser.id, otherUser.id)}`;
+        const channelName = `dm-${Math.min(
+          currentUser.id,
+          otherUser.id
+        )}-${Math.max(currentUser.id, otherUser.id)}`;
         const channel = ably.channels.get(channelName);
-        channel.publish('message', data.directMessage);
+        channel.publish("message", data.directMessage);
       }
     } catch (error) {
-      console.error('Failed to send file:', error);
+      console.error("Failed to send file:", error);
+    }
+  };
+
+  const handleDraggedFileSelect = (file: File) => {
+    setDraggedFile(file);
+    // Scroll to bottom to ensure FilePreview is visible
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  };
+
+  const handleDraggedFileCancel = () => {
+    setDraggedFile(null);
+  };
+
+  const handleDraggedFileSend = async () => {
+    if (!draggedFile || !currentUser || !otherUser) return;
+
+    setIsUploadingDraggedFile(true);
+
+    try {
+      // Upload the file
+      const formData = new FormData();
+      formData.append("file", draggedFile);
+
+      const uploadResponse = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        const error = await uploadResponse.json();
+        throw new Error(error.error || "Upload failed");
+      }
+
+      const uploadResult = await uploadResponse.json();
+
+      // Send direct message with file
+      const messageResponse = await fetch("/api/direct-messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          senderId: currentUser.id,
+          receiverId: otherUser.id,
+          message: newMessage.trim() || "", // Optional message text with file
+          fileName: uploadResult.file.originalName,
+          fileUrl: uploadResult.file.url,
+          fileType: uploadResult.file.type,
+          fileSize: uploadResult.file.size,
+        }),
+      });
+
+      const messageData = await messageResponse.json();
+
+      if (messageResponse.ok) {
+        // Add message locally
+        setMessages((prev) => {
+          const exists = prev.some(
+            (msg) => msg.id === messageData.directMessage.id
+          );
+          if (exists) return prev;
+          return [...prev, messageData.directMessage];
+        });
+
+        // Broadcast via Ably
+        const channelName = `dm-${Math.min(
+          currentUser.id,
+          otherUser.id
+        )}-${Math.max(currentUser.id, otherUser.id)}`;
+        const channel = ably.channels.get(channelName);
+        channel.publish("message", messageData.directMessage);
+
+        // Clear states
+        setDraggedFile(null);
+        setNewMessage("");
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      alert(error instanceof Error ? error.message : "Failed to upload file");
+    } finally {
+      setIsUploadingDraggedFile(false);
     }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (newMessage.trim() && otherUser) {
         sendMessage(e as unknown as React.FormEvent);
@@ -249,11 +365,14 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
   };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   return (
-    <div className="flex-1 flex flex-col bg-white">
+    <DragDropZone
+      onFileSelect={handleDraggedFileSelect}
+      className="flex-1 flex flex-col bg-white relative"
+    >
       <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
         <div className="flex items-center space-x-3">
           <User className="w-5 h-5 text-gray-600" />
@@ -283,18 +402,22 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
                 <div
                   key={`dm-${msg.id}-${msg.senderId}-${msg.receiverId}-${index}`}
                   className={`flex ${
-                    msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'
+                    msg.senderId === currentUser.id
+                      ? "justify-end"
+                      : "justify-start"
                   }`}
                 >
                   <div
                     className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
                       msg.senderId === currentUser.id
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-100 text-gray-900'
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-900"
                     }`}
                   >
                     <div className="text-xs opacity-70 mb-1">
-                      {msg.senderId === currentUser.id ? 'You' : otherUser.username}
+                      {msg.senderId === currentUser.id
+                        ? "You"
+                        : otherUser.username}
                     </div>
                     {msg.file_url ? (
                       <div className="mb-2">
@@ -305,11 +428,15 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
                           fileSize={msg.file_size!}
                         />
                         {msg.message && (
-                          <div className="mt-2 whitespace-pre-wrap break-words">{msg.message}</div>
+                          <div className="mt-2 whitespace-pre-wrap break-words">
+                            {msg.message}
+                          </div>
                         )}
                       </div>
                     ) : (
-                      <div className="whitespace-pre-wrap break-words">{msg.message}</div>
+                      <div className="whitespace-pre-wrap break-words">
+                        {msg.message}
+                      </div>
                     )}
                     <div className="text-xs opacity-50 mt-1">
                       {new Date(msg.timestamp).toLocaleTimeString()}
@@ -330,7 +457,22 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
         )}
       </div>
 
-      <form onSubmit={sendMessage} className="border-t border-gray-200 bg-white p-4">
+      {/* File preview for dragged files - always visible at bottom */}
+      {draggedFile && (
+        <div className="border-t border-gray-200 p-4 bg-gray-50">
+          <FilePreview
+            file={draggedFile}
+            onCancel={handleDraggedFileCancel}
+            onSend={handleDraggedFileSend}
+            isUploading={isUploadingDraggedFile}
+          />
+        </div>
+      )}
+
+      <form
+        onSubmit={sendMessage}
+        className="border-t border-gray-200 bg-white p-4"
+      >
         <div className="flex space-x-2 items-end">
           <div className="flex-1 relative">
             <input
@@ -357,6 +499,6 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
           </button>
         </div>
       </form>
-    </div>
+    </DragDropZone>
   );
 }

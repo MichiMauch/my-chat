@@ -1,11 +1,13 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { Hash, Send } from 'lucide-react';
-import ably from '@/lib/ably';
-import EmojiPickerComponent from './EmojiPicker';
-import FileUpload from './FileUpload';
-import FileMessage from './FileMessage';
+import { useState, useEffect, useRef } from "react";
+import { Hash, Send } from "lucide-react";
+import ably from "@/lib/ably";
+import EmojiPickerComponent from "./EmojiPicker";
+import FileUpload from "./FileUpload";
+import FileMessage from "./FileMessage";
+import DragDropZone from "./DragDropZone";
+import FilePreview from "./FilePreview";
 
 interface User {
   id: number;
@@ -40,9 +42,11 @@ interface ChatAreaProps {
 
 export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
+  const [newMessage, setNewMessage] = useState("");
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [draggedFile, setDraggedFile] = useState<File | null>(null);
+  const [isUploadingDraggedFile, setIsUploadingDraggedFile] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,14 +61,14 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
 
   const loadMessages = async () => {
     if (!activeRoom) return;
-    
+
     setLoading(true);
     try {
       const response = await fetch(`/api/messages?roomId=${activeRoom.id}`);
       const data = await response.json();
       setMessages(data.messages || []);
     } catch (error) {
-      console.error('Failed to load messages:', error);
+      console.error("Failed to load messages:", error);
     } finally {
       setLoading(false);
     }
@@ -74,18 +78,22 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
     if (!activeRoom) return;
 
     const channel = ably.channels.get(`chat-${activeRoom.id}`);
-    
-    channel.subscribe('message', (message) => {
+
+    channel.subscribe("message", (message) => {
       const messageData = message.data;
       // Only add messages from other users, not own messages
       if (messageData.senderId !== currentUser.id) {
         setMessages((prev) => {
           // Check if message already exists to prevent duplicates
-          const exists = prev.some(msg => 
-            msg.id === messageData.id || 
-            (msg.senderId === messageData.senderId && 
-             msg.message === messageData.message && 
-             Math.abs(new Date(msg.timestamp).getTime() - new Date(messageData.timestamp).getTime()) < 1000)
+          const exists = prev.some(
+            (msg) =>
+              msg.id === messageData.id ||
+              (msg.senderId === messageData.senderId &&
+                msg.message === messageData.message &&
+                Math.abs(
+                  new Date(msg.timestamp).getTime() -
+                    new Date(messageData.timestamp).getTime()
+                ) < 1000)
           );
           if (exists) return prev;
           return [...prev, messageData];
@@ -93,11 +101,11 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       }
     });
 
-    channel.subscribe('typing', (message) => {
+    channel.subscribe("typing", (message) => {
       const { username, isTyping } = message.data;
-      
+
       if (username === currentUser.username) return;
-      
+
       setTypingUsers((prev) => {
         const newSet = new Set(prev);
         if (isTyping) {
@@ -119,13 +127,13 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
     if (!newMessage.trim() || !currentUser || !activeRoom) return;
 
     const messageText = newMessage.trim();
-    setNewMessage('');
+    setNewMessage("");
 
     try {
-      const response = await fetch('/api/messages', {
-        method: 'POST',
+      const response = await fetch("/api/messages", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           senderId: currentUser.id,
@@ -135,37 +143,41 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       });
 
       const data = await response.json();
-      
+
       if (response.ok) {
         // Add own message locally immediately with duplicate check
         setMessages((prev) => {
-          const exists = prev.some(msg => 
-            msg.id === data.message.id || 
-            (msg.senderId === data.message.senderId && 
-             msg.message === data.message.message && 
-             Math.abs(new Date(msg.timestamp).getTime() - new Date(data.message.timestamp).getTime()) < 1000)
+          const exists = prev.some(
+            (msg) =>
+              msg.id === data.message.id ||
+              (msg.senderId === data.message.senderId &&
+                msg.message === data.message.message &&
+                Math.abs(
+                  new Date(msg.timestamp).getTime() -
+                    new Date(data.message.timestamp).getTime()
+                ) < 1000)
           );
           if (exists) return prev;
           return [...prev, data.message];
         });
-        
+
         // Broadcast to others via Ably
         const channel = ably.channels.get(`chat-${activeRoom.id}`);
-        channel.publish('message', data.message);
+        channel.publish("message", data.message);
       }
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error("Failed to send message:", error);
       setNewMessage(messageText);
     }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value);
-    
+
     if (!currentUser || !activeRoom) return;
-    
+
     const channel = ably.channels.get(`chat-${activeRoom.id}`);
-    channel.publish('typing', {
+    channel.publish("typing", {
       username: currentUser.username,
       isTyping: true,
     });
@@ -175,7 +187,7 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
     }
 
     typingTimeoutRef.current = setTimeout(() => {
-      channel.publish('typing', {
+      channel.publish("typing", {
         username: currentUser.username,
         isTyping: false,
       });
@@ -183,7 +195,7 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
   };
 
   const handleEmojiSelect = (emoji: string) => {
-    setNewMessage(prev => prev + emoji);
+    setNewMessage((prev) => prev + emoji);
     // Refocus the input after emoji selection
     setTimeout(() => {
       if (inputRef.current) {
@@ -201,14 +213,14 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
     if (!currentUser || !activeRoom) return;
 
     try {
-      const response = await fetch('/api/messages', {
-        method: 'POST',
+      const response = await fetch("/api/messages", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           senderId: currentUser.id,
-          message: '',
+          message: "",
           roomId: activeRoom.id,
           fileName: fileInfo.fileName,
           fileUrl: fileInfo.fileUrl,
@@ -218,31 +230,35 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       });
 
       const data = await response.json();
-      
+
       if (response.ok) {
         // Add own message locally immediately with duplicate check
         setMessages((prev) => {
-          const exists = prev.some(msg => 
-            msg.id === data.message.id || 
-            (msg.senderId === data.message.senderId && 
-             msg.file_url === data.message.file_url && 
-             Math.abs(new Date(msg.timestamp).getTime() - new Date(data.message.timestamp).getTime()) < 1000)
+          const exists = prev.some(
+            (msg) =>
+              msg.id === data.message.id ||
+              (msg.senderId === data.message.senderId &&
+                msg.file_url === data.message.file_url &&
+                Math.abs(
+                  new Date(msg.timestamp).getTime() -
+                    new Date(data.message.timestamp).getTime()
+                ) < 1000)
           );
           if (exists) return prev;
           return [...prev, data.message];
         });
-        
+
         // Broadcast to others via Ably
         const channel = ably.channels.get(`chat-${activeRoom.id}`);
-        channel.publish('message', data.message);
+        channel.publish("message", data.message);
       }
     } catch (error) {
-      console.error('Failed to send file:', error);
+      console.error("Failed to send file:", error);
     }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (newMessage.trim() && currentUser && activeRoom) {
         sendMessage(e as unknown as React.FormEvent);
@@ -250,8 +266,85 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
     }
   };
 
+  const handleDraggedFileSelect = (file: File) => {
+    setDraggedFile(file);
+    // Scroll to bottom to ensure FilePreview is visible
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  };
+
+  const handleDraggedFileCancel = () => {
+    setDraggedFile(null);
+  };
+
+  const handleDraggedFileSend = async () => {
+    if (!draggedFile || !currentUser || !activeRoom) return;
+
+    setIsUploadingDraggedFile(true);
+
+    try {
+      // Upload the file
+      const formData = new FormData();
+      formData.append("file", draggedFile);
+
+      const uploadResponse = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        const error = await uploadResponse.json();
+        throw new Error(error.error || "Upload failed");
+      }
+
+      const uploadResult = await uploadResponse.json();
+
+      // Send message with file
+      const messageResponse = await fetch("/api/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          senderId: currentUser.id,
+          message: newMessage.trim() || "", // Optional message text with file
+          roomId: activeRoom.id,
+          fileName: uploadResult.file.originalName,
+          fileUrl: uploadResult.file.url,
+          fileType: uploadResult.file.type,
+          fileSize: uploadResult.file.size,
+        }),
+      });
+
+      const messageData = await messageResponse.json();
+
+      if (messageResponse.ok) {
+        // Add message locally
+        setMessages((prev) => {
+          const exists = prev.some((msg) => msg.id === messageData.message.id);
+          if (exists) return prev;
+          return [...prev, messageData.message];
+        });
+
+        // Broadcast via Ably
+        const channel = ably.channels.get(`chat-${activeRoom.id}`);
+        channel.publish("message", messageData.message);
+
+        // Clear states
+        setDraggedFile(null);
+        setNewMessage("");
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      alert(error instanceof Error ? error.message : "Failed to upload file");
+    } finally {
+      setIsUploadingDraggedFile(false);
+    }
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   if (!activeRoom) {
@@ -271,7 +364,10 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-white">
+    <DragDropZone
+      onFileSelect={handleDraggedFileSelect}
+      className="flex-1 flex flex-col bg-white relative"
+    >
       <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
         <div className="flex items-center space-x-3">
           <Hash className="w-5 h-5 text-gray-600" />
@@ -302,14 +398,16 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
                 <div
                   key={`room-${msg.id}-${msg.senderId}-${msg.roomId}-${index}`}
                   className={`flex ${
-                    msg.senderId === currentUser?.id ? 'justify-end' : 'justify-start'
+                    msg.senderId === currentUser?.id
+                      ? "justify-end"
+                      : "justify-start"
                   }`}
                 >
                   <div
                     className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
                       msg.senderId === currentUser?.id
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-100 text-gray-900'
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-900"
                     }`}
                   >
                     <div className="text-xs opacity-70 mb-1">
@@ -324,11 +422,15 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
                           fileSize={msg.file_size!}
                         />
                         {msg.message && (
-                          <div className="mt-2 whitespace-pre-wrap break-words">{msg.message}</div>
+                          <div className="mt-2 whitespace-pre-wrap break-words">
+                            {msg.message}
+                          </div>
                         )}
                       </div>
                     ) : (
-                      <div className="whitespace-pre-wrap break-words">{msg.message}</div>
+                      <div className="whitespace-pre-wrap break-words">
+                        {msg.message}
+                      </div>
                     )}
                     <div className="text-xs opacity-50 mt-1">
                       {new Date(msg.timestamp).toLocaleTimeString()}
@@ -340,7 +442,8 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
             {typingUsers.size > 0 && (
               <div className="flex justify-start">
                 <div className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm">
-                  {Array.from(typingUsers).join(', ')} {typingUsers.size === 1 ? 'is' : 'are'} typing...
+                  {Array.from(typingUsers).join(", ")}{" "}
+                  {typingUsers.size === 1 ? "is" : "are"} typing...
                 </div>
               </div>
             )}
@@ -349,7 +452,22 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
         )}
       </div>
 
-      <form onSubmit={sendMessage} className="border-t border-gray-200 bg-white p-4">
+      {/* File preview for dragged files - always visible at bottom */}
+      {draggedFile && (
+        <div className="border-t border-gray-200 p-4 bg-gray-50">
+          <FilePreview
+            file={draggedFile}
+            onSend={handleDraggedFileSend}
+            onCancel={handleDraggedFileCancel}
+            isUploading={isUploadingDraggedFile}
+          />
+        </div>
+      )}
+
+      <form
+        onSubmit={sendMessage}
+        className="border-t border-gray-200 bg-white p-4"
+      >
         <div className="flex space-x-2 items-end">
           <div className="flex-1 relative">
             <input
@@ -376,6 +494,6 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
           </button>
         </div>
       </form>
-    </div>
+    </DragDropZone>
   );
 }

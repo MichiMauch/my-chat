@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
         originalName: file.name,
         size: file.size,
         type: file.type,
-        url: `https://pub-6a52908bab2567e2a24d0dec042053d5.r2.dev/${uniqueFilename}`
+        url: `https://pub-9d48840b20d449d1bef36e390ff73402.r2.dev/${uniqueFilename}`
       }
     });
 

@@ -12,4 +12,4 @@ export const r2Client = new S3Client({
 });
 
 export const R2_BUCKET_NAME = 'chat';
-export const R2_PUBLIC_URL = `https://pub-${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.dev`;
+export const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || `https://pub-9d48840b20d449d1bef36e390ff73402.r2.dev`;

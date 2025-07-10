@@ -1,15 +1,7 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import {
-  Download,
-  FileText,
-  Image as ImageIcon,
-  Video,
-  Music,
-  Eye,
-  Loader2,
-} from "lucide-react";
+import { useState } from 'react';
+import { Download, FileText, Image as ImageIcon, Video, Music, Eye, Loader2 } from 'lucide-react';
 
 interface FileMessageProps {
   fileName: string;
@@ -18,29 +10,24 @@ interface FileMessageProps {
   fileSize: number;
 }
 
-export default function FileMessage({
-  fileName,
-  fileUrl,
-  fileType,
-  fileSize,
-}: FileMessageProps) {
+export default function FileMessage({ fileName, fileUrl, fileType, fileSize }: FileMessageProps) {
   const [showPreview, setShowPreview] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
   const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
+    if (bytes === 0) return '0 Bytes';
     const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const getFileIcon = () => {
-    if (fileType.startsWith("image/")) {
+    if (fileType.startsWith('image/')) {
       return <ImageIcon className="w-6 h-6 text-blue-500" />;
-    } else if (fileType.startsWith("video/")) {
+    } else if (fileType.startsWith('video/')) {
       return <Video className="w-6 h-6 text-purple-500" />;
-    } else if (fileType.startsWith("audio/")) {
+    } else if (fileType.startsWith('audio/')) {
       return <Music className="w-6 h-6 text-green-500" />;
     } else {
       return <FileText className="w-6 h-6 text-gray-500" />;
@@ -48,27 +35,25 @@ export default function FileMessage({
   };
 
   const canPreview = () => {
-    return (
-      fileType.startsWith("image/") ||
-      fileType.startsWith("video/") ||
-      fileType.startsWith("audio/") ||
-      fileType === "application/pdf"
-    );
+    return fileType.startsWith('image/') || 
+           fileType.startsWith('video/') || 
+           fileType.startsWith('audio/') ||
+           fileType === 'application/pdf';
   };
 
   const renderPreview = () => {
-    if (fileType.startsWith("image/")) {
+    if (fileType.startsWith('image/')) {
       return (
-        <img
-          src={fileUrl}
+        <img 
+          src={fileUrl} 
           alt={fileName}
           className="max-w-xs max-h-64 rounded-lg object-contain"
         />
       );
-    } else if (fileType.startsWith("video/")) {
+    } else if (fileType.startsWith('video/')) {
       return (
-        <video
-          controls
+        <video 
+          controls 
           className="max-w-xs max-h-64 rounded-lg"
           preload="metadata"
         >
@@ -76,14 +61,14 @@ export default function FileMessage({
           Your browser does not support the video tag.
         </video>
       );
-    } else if (fileType.startsWith("audio/")) {
+    } else if (fileType.startsWith('audio/')) {
       return (
         <audio controls className="w-full max-w-xs">
           <source src={fileUrl} type={fileType} />
           Your browser does not support the audio tag.
         </audio>
       );
-    } else if (fileType === "application/pdf") {
+    } else if (fileType === 'application/pdf') {
       return (
         <iframe
           src={fileUrl}
@@ -97,35 +82,33 @@ export default function FileMessage({
 
   const handleDownload = async () => {
     if (isDownloading) return;
-
+    
     setIsDownloading(true);
     try {
       // Use our proxy download route to avoid CORS issues
-      const downloadUrl = `/api/download?url=${encodeURIComponent(
-        fileUrl
-      )}&filename=${encodeURIComponent(fileName)}`;
-
+      const downloadUrl = `/api/download?url=${encodeURIComponent(fileUrl)}&filename=${encodeURIComponent(fileName)}`;
+      
       const response = await fetch(downloadUrl);
-
+      
       if (!response.ok) {
-        throw new Error("Download failed");
+        throw new Error('Download failed');
       }
-
+      
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-
-      const link = document.createElement("a");
+      
+      const link = document.createElement('a');
       link.href = url;
       link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-
+      
       // Clean up the blob URL
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Download error:", error);
-      alert("Failed to download file. Please try again.");
+      console.error('Download error:', error);
+      alert('Failed to download file. Please try again.');
     } finally {
       setIsDownloading(false);
     }
@@ -137,16 +120,15 @@ export default function FileMessage({
         <div className="flex items-center space-x-3 flex-1 min-w-0">
           {getFileIcon()}
           <div className="flex-1 min-w-0">
-            <p
-              className="text-sm font-medium text-gray-900 truncate"
-              title={fileName}
-            >
+            <p className="text-sm font-medium text-gray-900 truncate" title={fileName}>
               {fileName}
             </p>
-            <p className="text-xs text-gray-500">{formatFileSize(fileSize)}</p>
+            <p className="text-xs text-gray-500">
+              {formatFileSize(fileSize)}
+            </p>
           </div>
         </div>
-
+        
         <div className="flex items-center space-x-1">
           {canPreview() && (
             <button
@@ -173,7 +155,9 @@ export default function FileMessage({
       </div>
 
       {showPreview && canPreview() && (
-        <div className="mt-3">{renderPreview()}</div>
+        <div className="mt-3">
+          {renderPreview()}
+        </div>
       )}
     </div>
   );
