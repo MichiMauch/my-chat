@@ -1,0 +1,264 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { Hash, Send } from 'lucide-react';
+import ably from '@/lib/ably';
+
+interface User {
+  id: number;
+  username: string;
+  created_at: string;
+}
+
+interface Room {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+}
+
+interface Message {
+  id: number;
+  senderId: number;
+  message: string;
+  timestamp: string;
+  username: string;
+  roomId: number;
+}
+
+interface ChatAreaProps {
+  currentUser: User;
+  activeRoom: Room | null;
+}
+
+export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (activeRoom) {
+      loadMessages();
+      setupAbly();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoom]);
+
+  const loadMessages = async () => {
+    if (!activeRoom) return;
+    
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/messages?roomId=${activeRoom.id}`);
+      const data = await response.json();
+      setMessages(data.messages || []);
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const setupAbly = () => {
+    if (!activeRoom) return;
+
+    const channel = ably.channels.get(`chat-${activeRoom.id}`);
+    
+    channel.subscribe('message', (message) => {
+      const messageData = message.data;
+      // Only add messages from other users, not own messages
+      if (messageData.senderId !== currentUser.id) {
+        setMessages((prev) => [...prev, messageData]);
+      }
+    });
+
+    channel.subscribe('typing', (message) => {
+      const { username, isTyping } = message.data;
+      
+      if (username === currentUser.username) return;
+      
+      setTypingUsers((prev) => {
+        const newSet = new Set(prev);
+        if (isTyping) {
+          newSet.add(username);
+        } else {
+          newSet.delete(username);
+        }
+        return newSet;
+      });
+    });
+
+    return () => {
+      channel.unsubscribe();
+    };
+  };
+
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !currentUser || !activeRoom) return;
+
+    const messageText = newMessage.trim();
+    setNewMessage('');
+
+    try {
+      const response = await fetch('/api/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          senderId: currentUser.id,
+          message: messageText,
+          roomId: activeRoom.id,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Add own message locally immediately
+        setMessages((prev) => [...prev, data.message]);
+        
+        // Broadcast to others via Ably
+        const channel = ably.channels.get(`chat-${activeRoom.id}`);
+        channel.publish('message', data.message);
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      setNewMessage(messageText);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    
+    if (!currentUser || !activeRoom) return;
+    
+    const channel = ably.channels.get(`chat-${activeRoom.id}`);
+    channel.publish('typing', {
+      username: currentUser.username,
+      isTyping: true,
+    });
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      channel.publish('typing', {
+        username: currentUser.username,
+        isTyping: false,
+      });
+    }, 1000);
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  if (!activeRoom) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Hash className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-600 mb-2">
+            Welcome to My Chat
+          </h2>
+          <p className="text-gray-500">
+            Select a channel from the sidebar to start chatting
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 flex flex-col bg-white">
+      <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center space-x-3">
+          <Hash className="w-5 h-5 text-gray-600" />
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">
+              {activeRoom.name}
+            </h1>
+            {activeRoom.description && (
+              <p className="text-sm text-gray-500">{activeRoom.description}</p>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {loading ? (
+          <div className="flex items-center justify-center h-32">
+            <div className="text-gray-500">Loading messages...</div>
+          </div>
+        ) : (
+          <>
+            {messages.length === 0 ? (
+              <div className="text-center text-gray-500 py-8">
+                No messages yet. Start the conversation!
+              </div>
+            ) : (
+              messages.map((msg, index) => (
+                <div
+                  key={`room-${msg.id}-${msg.senderId}-${msg.roomId}-${index}`}
+                  className={`flex ${
+                    msg.senderId === currentUser?.id ? 'justify-end' : 'justify-start'
+                  }`}
+                >
+                  <div
+                    className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                      msg.senderId === currentUser?.id
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-gray-100 text-gray-900'
+                    }`}
+                  >
+                    <div className="text-xs opacity-70 mb-1">
+                      {msg.username}
+                    </div>
+                    <div>{msg.message}</div>
+                    <div className="text-xs opacity-50 mt-1">
+                      {new Date(msg.timestamp).toLocaleTimeString()}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+            {typingUsers.size > 0 && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm">
+                  {Array.from(typingUsers).join(', ')} {typingUsers.size === 1 ? 'is' : 'are'} typing...
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </>
+        )}
+      </div>
+
+      <form onSubmit={sendMessage} className="border-t border-gray-200 bg-white p-4">
+        <div className="flex space-x-2">
+          <input
+            type="text"
+            value={newMessage}
+            onChange={handleInputChange}
+            placeholder={`Message #${activeRoom.name}`}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <button
+            type="submit"
+            disabled={!newMessage.trim()}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+          >
+            <Send className="w-4 h-4" />
+            <span>Send</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
