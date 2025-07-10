@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import ChatArea from '@/components/ChatArea';
@@ -20,6 +21,7 @@ interface Room {
 }
 
 export default function ChatPage() {
+  const { data: session, status } = useSession();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
   const [activeDirectMessage, setActiveDirectMessage] = useState<User | null>(null);
@@ -27,16 +29,22 @@ export default function ChatPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const userStr = localStorage.getItem('currentUser');
-    if (!userStr) {
-      router.push('/login');
+    if (status === 'loading') return;
+    
+    if (!session) {
+      router.push('/auth/signin');
       return;
     }
 
-    const user = JSON.parse(userStr);
+    // Create user object from session
+    const user = {
+      id: parseInt((session.user as { id?: string })?.id || '0'),
+      username: session.user?.name || session.user?.email?.split('@')[0] || 'Unknown',
+      created_at: new Date().toISOString()
+    };
     setCurrentUser(user);
     loadDefaultRoom();
-  }, [router]);
+  }, [session, status, router]);
 
   const loadDefaultRoom = async () => {
     try {
