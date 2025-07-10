@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     await r2Client.send(uploadCommand);
 
-    // Return file info
+    // Return file info (using the public R2.dev domain)
     return NextResponse.json({
       success: true,
       file: {
