@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Hash, Send } from 'lucide-react';
 import ably from '@/lib/ably';
+import EmojiPickerComponent from './EmojiPicker';
 
 interface User {
   id: number;
@@ -155,6 +156,10 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
     }, 1000);
   };
 
+  const handleEmojiSelect = (emoji: string) => {
+    setNewMessage(prev => prev + emoji);
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -220,7 +225,7 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
                     <div className="text-xs opacity-70 mb-1">
                       {msg.username}
                     </div>
-                    <div>{msg.message}</div>
+                    <div className="whitespace-pre-wrap break-words">{msg.message}</div>
                     <div className="text-xs opacity-50 mt-1">
                       {new Date(msg.timestamp).toLocaleTimeString()}
                     </div>
@@ -241,14 +246,19 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       </div>
 
       <form onSubmit={sendMessage} className="border-t border-gray-200 bg-white p-4">
-        <div className="flex space-x-2">
-          <input
-            type="text"
-            value={newMessage}
-            onChange={handleInputChange}
-            placeholder={`Message #${activeRoom.name}`}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
+        <div className="flex space-x-2 items-end">
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={newMessage}
+              onChange={handleInputChange}
+              placeholder={`Message #${activeRoom.name}`}
+              className="w-full px-4 py-2 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+              <EmojiPickerComponent onEmojiSelect={handleEmojiSelect} />
+            </div>
+          </div>
           <button
             type="submit"
             disabled={!newMessage.trim()}
