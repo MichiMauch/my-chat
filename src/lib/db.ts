@@ -20,6 +20,12 @@ export async function initializeDatabase() {
       senderId INTEGER NOT NULL,
       message TEXT NOT NULL,
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      roomId INTEGER,
+      file_name TEXT,
+      file_url TEXT,
+      file_type TEXT,
+      file_size INTEGER,
+      mentioned_users TEXT,
       FOREIGN KEY (senderId) REFERENCES users(id)
     );
   `);

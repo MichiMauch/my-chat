@@ -5,7 +5,7 @@ await initializeDatabase();
 
 export async function POST(request: NextRequest) {
   try {
-    const { senderId, message, roomId, fileName, fileUrl, fileType, fileSize } = await request.json();
+    const { senderId, message, roomId, fileName, fileUrl, fileType, fileSize, mentionedUsers } = await request.json();
 
     if (!senderId || (!message && !fileName) || !roomId) {
       return NextResponse.json(
@@ -15,8 +15,8 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await db.execute({
-      sql: 'INSERT INTO messages (senderId, message, roomId, file_name, file_url, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      args: [senderId, message || '', roomId, fileName || null, fileUrl || null, fileType || null, fileSize || null]
+      sql: 'INSERT INTO messages (senderId, message, roomId, file_name, file_url, file_type, file_size, mentioned_users) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      args: [senderId, message || '', roomId, fileName || null, fileUrl || null, fileType || null, fileSize || null, mentionedUsers ? JSON.stringify(mentionedUsers) : null]
     });
 
     const messageRecord = await db.execute({

@@ -3,12 +3,14 @@
 import { useState, useEffect, useRef } from "react";
 import { Hash, Send } from "lucide-react";
 import ably from "@/lib/ably";
-import { playNotificationSound } from "@/lib/audio";
+import { playNotificationSound, playMentionSound } from "@/lib/audio";
+import { highlightMentions, extractMentionedUserIds } from "@/lib/mentions";
 import EmojiPickerComponent from "./EmojiPicker";
 import FileUpload from "./FileUpload";
 import FileMessage from "./FileMessage";
 import DragDropZone from "./DragDropZone";
 import FilePreview from "./FilePreview";
+import MentionPicker from "./MentionPicker";
 
 interface User {
   id: number;
@@ -48,6 +50,11 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
   const [loading, setLoading] = useState(false);
   const [draggedFile, setDraggedFile] = useState<File | null>(null);
   const [isUploadingDraggedFile, setIsUploadingDraggedFile] = useState(false);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [mentionPickerPosition, setMentionPickerPosition] = useState({ x: 0, y: 0 });
+  const [mentionSearchTerm, setMentionSearchTerm] = useState("");
+  const [mentionStartIndex, setMentionStartIndex] = useState(-1);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,8 +64,19 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       loadMessages();
       setupAbly();
     }
+    loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoom]);
+
+  const loadUsers = async () => {
+    try {
+      const response = await fetch('/api/users');
+      const data = await response.json();
+      setAllUsers(data.users || []);
+    } catch (error) {
+      console.error("Failed to load users:", error);
+    }
+  };
 
   const loadMessages = async () => {
     if (!activeRoom) return;
@@ -98,8 +116,16 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
           );
           if (exists) return prev;
           
-          // Play notification sound for new incoming message
-          playNotificationSound();
+          // Check if current user is mentioned
+          const mentionedUsers = messageData.mentioned_users ? JSON.parse(messageData.mentioned_users) : [];
+          const isMentioned = mentionedUsers.includes(currentUser.id);
+          
+          // Play appropriate notification sound
+          if (isMentioned) {
+            playMentionSound();
+          } else {
+            playNotificationSound();
+          }
           
           return [...prev, messageData];
         });
@@ -133,8 +159,12 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
 
     const messageText = newMessage.trim();
     setNewMessage("");
+    setShowMentionPicker(false);
 
     try {
+      // Extract mentioned users
+      const mentionedUserIds = extractMentionedUserIds(messageText, allUsers);
+
       const response = await fetch("/api/messages", {
         method: "POST",
         headers: {
@@ -144,6 +174,7 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
           senderId: currentUser.id,
           message: messageText,
           roomId: activeRoom.id,
+          mentionedUsers: mentionedUserIds
         }),
       });
 
@@ -177,7 +208,35 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setNewMessage(e.target.value);
+    const value = e.target.value;
+    const cursorPosition = e.target.selectionStart || 0;
+    setNewMessage(value);
+
+    // Check for mention trigger (@)
+    const textBeforeCursor = value.substring(0, cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      // Check if there's no space after @ (indicating potential mention)
+      if (!textAfterAt.includes(' ') && textAfterAt.length <= 20) {
+        setMentionSearchTerm(textAfterAt);
+        setMentionStartIndex(lastAtIndex);
+        setShowMentionPicker(true);
+        
+        // Calculate picker position
+        const inputElement = e.target;
+        const rect = inputElement.getBoundingClientRect();
+        setMentionPickerPosition({
+          x: rect.left,
+          y: rect.top
+        });
+      } else {
+        setShowMentionPicker(false);
+      }
+    } else {
+      setShowMentionPicker(false);
+    }
 
     if (!currentUser || !activeRoom) return;
 
@@ -197,6 +256,28 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
         isTyping: false,
       });
     }, 1000);
+  };
+
+  const handleMentionSelect = (user: User) => {
+    if (mentionStartIndex === -1) return;
+    
+    const beforeMention = newMessage.substring(0, mentionStartIndex);
+    const afterMention = newMessage.substring(mentionStartIndex + 1 + mentionSearchTerm.length);
+    const newValue = beforeMention + `@${user.username} ` + afterMention;
+    
+    setNewMessage(newValue);
+    setShowMentionPicker(false);
+    setMentionStartIndex(-1);
+    setMentionSearchTerm("");
+    
+    // Refocus input
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        const newCursorPosition = beforeMention.length + user.username.length + 2; // +2 for @ and space
+        inputRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
+      }
+    }, 0);
   };
 
   const handleEmojiSelect = (emoji: string) => {
@@ -428,13 +509,13 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
                         />
                         {msg.message && (
                           <div className="mt-2 whitespace-pre-wrap break-words">
-                            {msg.message}
+                            {highlightMentions({ text: msg.message })}
                           </div>
                         )}
                       </div>
                     ) : (
                       <div className="whitespace-pre-wrap break-words">
-                        {msg.message}
+                        {highlightMentions({ text: msg.message })}
                       </div>
                     )}
                     <div className="text-xs opacity-50 mt-1">
@@ -499,6 +580,15 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
           </button>
         </div>
       </form>
+
+      {/* Mention Picker */}
+      <MentionPicker
+        users={allUsers.filter(user => user.id !== currentUser.id)}
+        onMentionSelect={handleMentionSelect}
+        isVisible={showMentionPicker}
+        position={mentionPickerPosition}
+        searchTerm={mentionSearchTerm}
+      />
     </DragDropZone>
   );
 }

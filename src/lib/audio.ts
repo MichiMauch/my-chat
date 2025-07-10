@@ -89,3 +89,45 @@ export const playMessageSentSound = () => {
     // Silently fail
   }
 };
+
+export const playMentionSound = () => {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    const createTone = (frequency: number, duration: number, delay: number = 0) => {
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+          oscillator.type = 'sine';
+          
+          // More prominent sound for mentions
+          gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+          gainNode.gain.linearRampToValueAtTime(0.4, audioContext.currentTime + 0.01);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+          
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + duration);
+          
+          oscillator.onended = () => resolve();
+        }, delay);
+      });
+    };
+    
+    // Play a more attention-grabbing sequence for mentions: E5 -> G5 -> C6
+    const playSequence = async () => {
+      await createTone(659.25, 0.2, 0);    // E5
+      await createTone(783.99, 0.2, 200);  // G5
+      await createTone(1046.5, 0.25, 400); // C6
+    };
+    
+    playSequence();
+  } catch {
+    // Silently fail
+  }
+};
