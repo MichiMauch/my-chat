@@ -39,6 +39,7 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (activeRoom) {
@@ -177,6 +178,12 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
 
   const handleEmojiSelect = (emoji: string) => {
     setNewMessage(prev => prev + emoji);
+    // Refocus the input after emoji selection
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }, 100);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -277,6 +284,7 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
         <div className="flex space-x-2 items-end">
           <div className="flex-1 relative">
             <input
+              ref={inputRef}
               type="text"
               value={newMessage}
               onChange={handleInputChange}
