@@ -5,18 +5,18 @@ await initializeDatabase();
 
 export async function POST(request: NextRequest) {
   try {
-    const { senderId, message, roomId } = await request.json();
+    const { senderId, message, roomId, fileName, fileUrl, fileType, fileSize } = await request.json();
 
-    if (!senderId || !message || !roomId) {
+    if (!senderId || (!message && !fileName) || !roomId) {
       return NextResponse.json(
-        { error: 'SenderId, message, and roomId are required' },
+        { error: 'SenderId, message or file, and roomId are required' },
         { status: 400 }
       );
     }
 
     const result = await db.execute({
-      sql: 'INSERT INTO messages (senderId, message, roomId) VALUES (?, ?, ?)',
-      args: [senderId, message, roomId]
+      sql: 'INSERT INTO messages (senderId, message, roomId, file_name, file_url, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      args: [senderId, message || '', roomId, fileName || null, fileUrl || null, fileType || null, fileSize || null]
     });
 
     const messageRecord = await db.execute({

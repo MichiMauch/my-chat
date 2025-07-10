@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { User, Send } from 'lucide-react';
 import ably from '@/lib/ably';
 import EmojiPickerComponent from './EmojiPicker';
+import FileUpload from './FileUpload';
+import FileMessage from './FileMessage';
 
 interface CurrentUser {
   id: number;
@@ -19,6 +21,10 @@ interface DirectMessage {
   timestamp: string;
   senderUsername: string;
   receiverUsername: string;
+  file_name?: string;
+  file_url?: string;
+  file_type?: string;
+  file_size?: number;
 }
 
 interface DirectMessageAreaProps {
@@ -183,6 +189,56 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
     }, 100);
   };
 
+  const handleFileSelect = async (fileInfo: {
+    fileName: string;
+    fileUrl: string;
+    fileType: string;
+    fileSize: number;
+  }) => {
+    if (!otherUser) return;
+
+    try {
+      const response = await fetch('/api/direct-messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          senderId: currentUser.id,
+          receiverId: otherUser.id,
+          message: '',
+          fileName: fileInfo.fileName,
+          fileUrl: fileInfo.fileUrl,
+          fileType: fileInfo.fileType,
+          fileSize: fileInfo.fileSize,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Add own message locally immediately with duplicate check
+        setMessages((prev) => {
+          const exists = prev.some(msg => 
+            msg.id === data.directMessage.id || 
+            (msg.senderId === data.directMessage.senderId && 
+             msg.file_url === data.directMessage.file_url && 
+             Math.abs(new Date(msg.timestamp).getTime() - new Date(data.directMessage.timestamp).getTime()) < 1000)
+          );
+          if (exists) return prev;
+          return [...prev, data.directMessage];
+        });
+        
+        // Broadcast to other user via Ably
+        const channelName = `dm-${Math.min(currentUser.id, otherUser.id)}-${Math.max(currentUser.id, otherUser.id)}`;
+        const channel = ably.channels.get(channelName);
+        channel.publish('message', data.directMessage);
+      }
+    } catch (error) {
+      console.error('Failed to send file:', error);
+    }
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -240,7 +296,21 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
                     <div className="text-xs opacity-70 mb-1">
                       {msg.senderId === currentUser.id ? 'You' : otherUser.username}
                     </div>
-                    <div className="whitespace-pre-wrap break-words">{msg.message}</div>
+                    {msg.file_url ? (
+                      <div className="mb-2">
+                        <FileMessage
+                          fileName={msg.file_name!}
+                          fileUrl={msg.file_url}
+                          fileType={msg.file_type!}
+                          fileSize={msg.file_size!}
+                        />
+                        {msg.message && (
+                          <div className="mt-2 whitespace-pre-wrap break-words">{msg.message}</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap break-words">{msg.message}</div>
+                    )}
                     <div className="text-xs opacity-50 mt-1">
                       {new Date(msg.timestamp).toLocaleTimeString()}
                     </div>
@@ -270,9 +340,10 @@ export default function DirectMessageArea({ currentUser, otherUser }: DirectMess
               onChange={handleInputChange}
               onKeyPress={handleKeyPress}
               placeholder={`Message ${otherUser.username}`}
-              className="w-full px-4 py-2 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-4 py-2 pr-20 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-1">
+              <FileUpload onFileSelect={handleFileSelect} />
               <EmojiPickerComponent onEmojiSelect={handleEmojiSelect} />
             </div>
           </div>

@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Hash, Send } from 'lucide-react';
 import ably from '@/lib/ably';
 import EmojiPickerComponent from './EmojiPicker';
+import FileUpload from './FileUpload';
+import FileMessage from './FileMessage';
 
 interface User {
   id: number;
@@ -25,6 +27,10 @@ interface Message {
   timestamp: string;
   username: string;
   roomId: number;
+  file_name?: string;
+  file_url?: string;
+  file_type?: string;
+  file_size?: number;
 }
 
 interface ChatAreaProps {
@@ -186,6 +192,55 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
     }, 100);
   };
 
+  const handleFileSelect = async (fileInfo: {
+    fileName: string;
+    fileUrl: string;
+    fileType: string;
+    fileSize: number;
+  }) => {
+    if (!currentUser || !activeRoom) return;
+
+    try {
+      const response = await fetch('/api/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          senderId: currentUser.id,
+          message: '',
+          roomId: activeRoom.id,
+          fileName: fileInfo.fileName,
+          fileUrl: fileInfo.fileUrl,
+          fileType: fileInfo.fileType,
+          fileSize: fileInfo.fileSize,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Add own message locally immediately with duplicate check
+        setMessages((prev) => {
+          const exists = prev.some(msg => 
+            msg.id === data.message.id || 
+            (msg.senderId === data.message.senderId && 
+             msg.file_url === data.message.file_url && 
+             Math.abs(new Date(msg.timestamp).getTime() - new Date(data.message.timestamp).getTime()) < 1000)
+          );
+          if (exists) return prev;
+          return [...prev, data.message];
+        });
+        
+        // Broadcast to others via Ably
+        const channel = ably.channels.get(`chat-${activeRoom.id}`);
+        channel.publish('message', data.message);
+      }
+    } catch (error) {
+      console.error('Failed to send file:', error);
+    }
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -260,7 +315,21 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
                     <div className="text-xs opacity-70 mb-1">
                       {msg.username}
                     </div>
-                    <div className="whitespace-pre-wrap break-words">{msg.message}</div>
+                    {msg.file_url ? (
+                      <div className="mb-2">
+                        <FileMessage
+                          fileName={msg.file_name!}
+                          fileUrl={msg.file_url}
+                          fileType={msg.file_type!}
+                          fileSize={msg.file_size!}
+                        />
+                        {msg.message && (
+                          <div className="mt-2 whitespace-pre-wrap break-words">{msg.message}</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap break-words">{msg.message}</div>
+                    )}
                     <div className="text-xs opacity-50 mt-1">
                       {new Date(msg.timestamp).toLocaleTimeString()}
                     </div>
@@ -290,9 +359,10 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
               onChange={handleInputChange}
               onKeyPress={handleKeyPress}
               placeholder={`Message #${activeRoom.name}`}
-              className="w-full px-4 py-2 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-4 py-2 pr-20 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-1">
+              <FileUpload onFileSelect={handleFileSelect} />
               <EmojiPickerComponent onEmojiSelect={handleEmojiSelect} />
             </div>
           </div>

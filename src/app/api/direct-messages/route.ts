@@ -5,18 +5,18 @@ await initializeDatabase();
 
 export async function POST(request: NextRequest) {
   try {
-    const { senderId, receiverId, message } = await request.json();
+    const { senderId, receiverId, message, fileName, fileUrl, fileType, fileSize } = await request.json();
 
-    if (!senderId || !receiverId || !message) {
+    if (!senderId || !receiverId || (!message && !fileName)) {
       return NextResponse.json(
-        { error: 'SenderId, receiverId, and message are required' },
+        { error: 'SenderId, receiverId, and message or file are required' },
         { status: 400 }
       );
     }
 
     const result = await db.execute({
-      sql: 'INSERT INTO direct_messages (senderId, receiverId, message) VALUES (?, ?, ?)',
-      args: [senderId, receiverId, message]
+      sql: 'INSERT INTO direct_messages (senderId, receiverId, message, file_name, file_url, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      args: [senderId, receiverId, message || '', fileName || null, fileUrl || null, fileType || null, fileSize || null]
     });
 
     const directMessage = await db.execute({
