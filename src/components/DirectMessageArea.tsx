@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { User, Send } from "lucide-react";
 import ably from "@/lib/ably";
+import { playNotificationSound } from "@/lib/audio";
 import EmojiPickerComponent from "./EmojiPicker";
 import FileUpload from "./FileUpload";
 import FileMessage from "./FileMessage";
@@ -99,6 +100,10 @@ export default function DirectMessageArea({
                 ) < 1000)
           );
           if (exists) return prev;
+          
+          // Play notification sound for new incoming message
+          playNotificationSound();
+          
           return [...prev, messageData];
         });
       }
