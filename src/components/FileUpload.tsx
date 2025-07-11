@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useRef } from 'react';
-import { Paperclip, X, Image, FileText } from 'lucide-react';
+import { useState, useRef } from "react";
+import { Paperclip, X, Image, FileText } from "lucide-react";
 
 interface FileUploadProps {
   onFileSelect: (fileInfo: {
@@ -15,7 +15,7 @@ interface FileUploadProps {
 interface SelectedFile {
   file: File;
   preview: string;
-  type: 'image' | 'document';
+  type: "image" | "document";
 }
 
 export default function FileUpload({ onFileSelect }: FileUploadProps) {
@@ -26,24 +26,24 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
   const handleFileSelect = async (file: File) => {
     // Check file size (max 5MB for Vercel compatibility)
     if (file.size > 5 * 1024 * 1024) {
-      alert('File size must be less than 5MB');
+      alert("File size must be less than 5MB");
       return;
     }
 
     // Check file type
     const allowedTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/gif',
-      'image/webp',
-      'application/pdf',
-      'text/plain',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "application/pdf",
+      "text/plain",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
 
     if (!allowedTypes.includes(file.type)) {
-      alert('File type not supported. Please use images, PDF, or text files.');
+      alert("File type not supported. Please use images, PDF, or text files.");
       return;
     }
 
@@ -54,19 +54,19 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result as string;
-        const fileType = file.type.startsWith('image/') ? 'image' : 'document';
-        
+        const fileType = file.type.startsWith("image/") ? "image" : "document";
+
         setSelectedFile({
           file,
-          preview: fileType === 'image' ? result : '',
-          type: fileType
+          preview: fileType === "image" ? result : "",
+          type: fileType,
         });
         setIsUploading(false);
       };
       reader.readAsDataURL(file);
     } catch (error) {
-      console.error('Error reading file:', error);
-      alert('Error reading file');
+      console.error("Error reading file:", error);
+      alert("Error reading file");
       setIsUploading(false);
     }
   };
@@ -80,26 +80,26 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
 
   const handleSendFile = async () => {
     if (!selectedFile) return;
-    
+
     setIsUploading(true);
-    
+
     try {
       // Upload file to R2
       const formData = new FormData();
-      formData.append('file', selectedFile.file);
-      
-      const response = await fetch('/api/upload', {
-        method: 'POST',
+      formData.append("file", selectedFile.file);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
         body: formData,
       });
-      
+
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
+        throw new Error(error.error || "Upload failed");
       }
-      
+
       const result = await response.json();
-      
+
       // Call the callback with file info
       onFileSelect({
         fileName: result.file.originalName,
@@ -107,15 +107,15 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
         fileType: result.file.type,
         fileSize: result.file.size,
       });
-      
+
       // Reset state
       setSelectedFile(null);
       if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+        fileInputRef.current.value = "";
       }
     } catch (error) {
-      console.error('Upload error:', error);
-      alert(error instanceof Error ? error.message : 'Failed to upload file');
+      console.error("Upload error:", error);
+      alert(error instanceof Error ? error.message : "Failed to upload file");
     } finally {
       setIsUploading(false);
     }
@@ -124,16 +124,16 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
   const handleCancel = () => {
     setSelectedFile(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
   const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return "0 Bytes";
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB'];
+    const sizes = ["Bytes", "KB", "MB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
   return (
@@ -145,7 +145,7 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
         className="hidden"
         accept="image/*,.pdf,.txt,.doc,.docx"
       />
-      
+
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
@@ -167,9 +167,9 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
               <X className="w-4 h-4" />
             </button>
           </div>
-          
+
           <div className="mb-3">
-            {selectedFile.type === 'image' ? (
+            {selectedFile.type === "image" ? (
               <div className="relative">
                 <img
                   src={selectedFile.preview}
@@ -192,12 +192,12 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
               </div>
             )}
           </div>
-          
+
           <div className="text-xs text-gray-500 mb-3">
             <p>{selectedFile.file.name}</p>
             <p>{formatFileSize(selectedFile.file.size)}</p>
           </div>
-          
+
           <div className="flex space-x-2">
             <button
               onClick={handleCancel}
@@ -210,7 +210,7 @@ export default function FileUpload({ onFileSelect }: FileUploadProps) {
               disabled={isUploading}
               className="flex-1 px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isUploading ? 'Uploading...' : 'Send'}
+              {isUploading ? "Uploading..." : "Send"}
             </button>
           </div>
         </div>

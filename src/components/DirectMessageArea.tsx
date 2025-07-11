@@ -4,11 +4,13 @@ import { useState, useEffect, useRef } from "react";
 import { User, Send } from "lucide-react";
 import ably from "@/lib/ably";
 import { playNotificationSound } from "@/lib/audio";
+import { notificationManager } from "@/lib/notifications";
 import EmojiPickerComponent from "./EmojiPicker";
 import FileUpload from "./FileUpload";
 import FileMessage from "./FileMessage";
 import DragDropZone from "./DragDropZone";
 import FilePreview from "./FilePreview";
+import YouTubePreview, { detectYouTubeUrls } from "./YouTubePreview";
 
 interface CurrentUser {
   id: number;
@@ -24,6 +26,8 @@ interface DirectMessage {
   timestamp: string;
   senderUsername: string;
   receiverUsername: string;
+  senderAvatarUrl?: string;
+  receiverAvatarUrl?: string;
   file_name?: string;
   file_url?: string;
   file_type?: string;
@@ -100,10 +104,16 @@ export default function DirectMessageArea({
                 ) < 1000)
           );
           if (exists) return prev;
-          
+
           // Play notification sound for new incoming message
           playNotificationSound();
-          
+
+          // Show push notification for direct message
+          notificationManager.showSimpleNotification(
+            `New direct message from ${messageData.senderUsername}`,
+            messageData.message
+          );
+
           return [...prev, messageData];
         });
       }
@@ -376,9 +386,9 @@ export default function DirectMessageArea({
   return (
     <DragDropZone
       onFileSelect={handleDraggedFileSelect}
-      className="flex-1 flex flex-col bg-white relative"
+      className="h-full flex flex-col bg-white relative"
     >
-      <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
+      <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex-shrink-0">
         <div className="flex items-center space-x-3">
           <User className="w-5 h-5 text-gray-600" />
           <div>
@@ -403,52 +413,92 @@ export default function DirectMessageArea({
                 <p>Start a private conversation with {otherUser.username}</p>
               </div>
             ) : (
-              messages.map((msg, index) => (
-                <div
-                  key={`dm-${msg.id}-${msg.senderId}-${msg.receiverId}-${index}`}
-                  className={`flex ${
-                    msg.senderId === currentUser.id
-                      ? "justify-end"
-                      : "justify-start"
-                  }`}
-                >
+              messages.map((msg, index) => {
+                const isCurrentUser = msg.senderId === currentUser.id;
+                const avatarUrl = isCurrentUser
+                  ? msg.senderAvatarUrl
+                  : msg.receiverAvatarUrl;
+                const username = isCurrentUser ? "You" : otherUser.username;
+
+                return (
                   <div
-                    className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                      msg.senderId === currentUser.id
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-100 text-gray-900"
-                    }`}
+                    key={`dm-${msg.id}-${msg.senderId}-${msg.receiverId}-${index}`}
+                    className="flex items-start space-x-3 justify-start"
                   >
-                    <div className="text-xs opacity-70 mb-1">
-                      {msg.senderId === currentUser.id
-                        ? "You"
-                        : otherUser.username}
-                    </div>
-                    {msg.file_url ? (
-                      <div className="mb-2">
-                        <FileMessage
-                          fileName={msg.file_name!}
-                          fileUrl={msg.file_url}
-                          fileType={msg.file_type!}
-                          fileSize={msg.file_size!}
+                    {/* Avatar - immer links */}
+                    <div className="flex-shrink-0">
+                      {avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          className="w-8 h-8 rounded-full"
+                          src={avatarUrl}
+                          alt={username}
                         />
-                        {msg.message && (
-                          <div className="mt-2 whitespace-pre-wrap break-words">
-                            {msg.message}
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
+                          <span className="text-xs font-medium text-gray-600">
+                            {username.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Message Content - immer rechts vom Avatar */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline space-x-2 mb-1">
+                        <span className="text-sm font-medium text-gray-900">
+                          {username}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {new Date(msg.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+
+                      <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 shadow-sm">
+                        {msg.file_url ? (
+                          <div className="mb-2">
+                            <FileMessage
+                              fileName={msg.file_name!}
+                              fileUrl={msg.file_url}
+                              fileType={msg.file_type!}
+                              fileSize={msg.file_size!}
+                            />
+                            {msg.message && (
+                              <div className="mt-2">
+                                <div className="whitespace-pre-wrap break-words text-gray-900 mb-2">
+                                  {msg.message}
+                                </div>
+                                {/* YouTube Preview */}
+                                {detectYouTubeUrls(msg.message).map((url, index) => (
+                                  <YouTubePreview 
+                                    key={`dm-${msg.id}-youtube-${index}`}
+                                    url={url} 
+                                    className="mt-2"
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="whitespace-pre-wrap break-words text-gray-900 mb-2">
+                              {msg.message}
+                            </div>
+                            {/* YouTube Preview for text-only direct messages */}
+                            {detectYouTubeUrls(msg.message).map((url, index) => (
+                              <YouTubePreview 
+                                key={`dm-${msg.id}-youtube-${index}`}
+                                url={url} 
+                                className="mt-2"
+                              />
+                            ))}
                           </div>
                         )}
                       </div>
-                    ) : (
-                      <div className="whitespace-pre-wrap break-words">
-                        {msg.message}
-                      </div>
-                    )}
-                    <div className="text-xs opacity-50 mt-1">
-                      {new Date(msg.timestamp).toLocaleTimeString()}
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
             {typingUsers.size > 0 && (
               <div className="flex justify-start">
@@ -476,7 +526,7 @@ export default function DirectMessageArea({
 
       <form
         onSubmit={sendMessage}
-        className="border-t border-gray-200 bg-white p-4"
+        className="border-t border-gray-200 bg-white p-4 flex-shrink-0"
       >
         <div className="flex space-x-2 items-end">
           <div className="flex-1 relative">

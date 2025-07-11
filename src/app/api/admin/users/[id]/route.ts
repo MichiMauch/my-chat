@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import bcrypt from 'bcryptjs';
 import db, { initializeDatabase } from '@/lib/db';
 
 await initializeDatabase();
@@ -39,20 +40,47 @@ export async function PUT(
   }
 
   try {
-    const { role } = await request.json();
+    const { username, email, role, password } = await request.json();
     const resolvedParams = await params;
     const userId = resolvedParams.id;
 
-    if (!role || !['user', 'admin'].includes(role)) {
+    // Build update query dynamically based on provided fields
+    const updates: string[] = [];
+    const args: (string | number)[] = [];
+
+    if (username) {
+      updates.push('username = ?');
+      args.push(username);
+    }
+
+    if (email) {
+      updates.push('email = ?');
+      args.push(email);
+    }
+
+    if (role && ['user', 'admin'].includes(role)) {
+      updates.push('role = ?');
+      args.push(role);
+    }
+
+    if (password) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      updates.push('password_hash = ?');
+      args.push(passwordHash);
+    }
+
+    if (updates.length === 0) {
       return NextResponse.json(
-        { error: 'Valid role (user/admin) is required' },
+        { error: 'No valid fields to update' },
         { status: 400 }
       );
     }
 
+    args.push(userId);
+
     await db.execute({
-      sql: 'UPDATE users SET role = ? WHERE id = ?',
-      args: [role, userId]
+      sql: `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
+      args
     });
 
     const updatedUser = await db.execute({
@@ -61,7 +89,13 @@ export async function PUT(
     });
 
     return NextResponse.json({ user: updatedUser.rows[0] });
-  } catch {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+      return NextResponse.json(
+        { error: 'Username or email already exists' },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

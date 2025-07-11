@@ -1,21 +1,26 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Hash, Send } from "lucide-react";
+import { Hash, Send, MessageSquare } from "lucide-react";
 import ably from "@/lib/ably";
 import { playNotificationSound, playMentionSound } from "@/lib/audio";
-import { highlightMentions, extractMentionedUserIds } from "@/lib/mentions";
+import { notificationManager } from "@/lib/notifications";
+import { highlightMentions } from "@/lib/mentions";
+import { extractMentionedUserIds } from "@/lib/mentions-utils";
 import EmojiPickerComponent from "./EmojiPicker";
 import FileUpload from "./FileUpload";
 import FileMessage from "./FileMessage";
 import DragDropZone from "./DragDropZone";
 import FilePreview from "./FilePreview";
 import MentionPicker from "./MentionPicker";
+import ThreadArea from "./ThreadArea";
+import YouTubePreview, { detectYouTubeUrls } from "./YouTubePreview";
 
 interface User {
   id: number;
   username: string;
   created_at: string;
+  avatar_url?: string;
 }
 
 interface Room {
@@ -32,31 +37,46 @@ interface Message {
   timestamp: string;
   username: string;
   roomId: number;
+  avatar_url?: string;
   file_name?: string;
   file_url?: string;
   file_type?: string;
   file_size?: number;
+  parent_message_id?: number;
+  thread_count?: number;
+  last_thread_timestamp?: string;
 }
 
 interface ChatAreaProps {
   currentUser: User;
   activeRoom: Room | null;
+  allUsers: User[];
 }
 
-export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
+export default function ChatArea({
+  currentUser,
+  activeRoom,
+  allUsers,
+}: ChatAreaProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [draggedFile, setDraggedFile] = useState<File | null>(null);
   const [isUploadingDraggedFile, setIsUploadingDraggedFile] = useState(false);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
-  const [mentionPickerPosition, setMentionPickerPosition] = useState({ x: 0, y: 0 });
+  const [mentionPickerPosition, setMentionPickerPosition] = useState({
+    x: 0,
+    y: 0,
+  });
   const [mentionSearchTerm, setMentionSearchTerm] = useState("");
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission>("default");
+  const [activeThread, setActiveThread] = useState<Message | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const mentionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -64,18 +84,45 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       loadMessages();
       setupAbly();
     }
-    loadUsers();
+
+    // Initialize notifications
+    initializeNotifications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoom]);
 
-  const loadUsers = async () => {
-    try {
-      const response = await fetch('/api/users');
-      const data = await response.json();
-      setAllUsers(data.users || []);
-    } catch (error) {
-      console.error("Failed to load users:", error);
+  const initializeNotifications = async () => {
+    if (notificationManager.isSupported()) {
+      const initialized = await notificationManager.initialize();
+      if (initialized) {
+        // Get current permission status
+        const currentPermission = notificationManager.getPermissionStatus();
+        setNotificationPermission(currentPermission);
+        console.log("Current notification permission:", currentPermission);
+
+        // Request permission if not already granted
+        if (currentPermission === "default") {
+          const permission = await notificationManager.requestPermission();
+          setNotificationPermission(permission);
+          console.log("Requested notification permission:", permission);
+        }
+      }
     }
+  };
+
+  const handleEnableNotifications = async () => {
+    if (notificationPermission === "denied") {
+      alert(`Notifications are blocked. To enable them:
+
+Chrome: Click the 🔒 lock icon in the address bar → Notifications → Allow
+Firefox: Click the shield icon → Permissions → Notifications → Allow
+Safari: Safari menu → Settings for This Website → Notifications → Allow
+
+Then refresh this page.`);
+      return;
+    }
+
+    const permission = await notificationManager.requestPermission();
+    setNotificationPermission(permission);
   };
 
   const loadMessages = async () => {
@@ -96,12 +143,29 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
   const setupAbly = () => {
     if (!activeRoom) return;
 
+    console.log("Setting up Ably for room:", activeRoom.id, activeRoom.name);
+
+    // Get the channel for current room
     const channel = ably.channels.get(`chat-${activeRoom.id}`);
+
+    // Clean up any existing subscriptions on this channel
+    channel.unsubscribe();
 
     channel.subscribe("message", (message) => {
       const messageData = message.data;
-      // Only add messages from other users, not own messages
-      if (messageData.senderId !== currentUser.id) {
+
+      console.log("=== ABLY MESSAGE RECEIVED ===");
+      console.log("Channel:", `chat-${activeRoom.id}`);
+      console.log("Message data:", messageData);
+      console.log("Message roomId:", messageData.roomId);
+      console.log("Current room ID:", activeRoom.id);
+      console.log("Room ID match:", messageData.roomId === activeRoom.id);
+
+      // STRICT FILTER: Only add messages that are exactly for THIS room and from other users
+      if (
+        messageData.senderId !== currentUser.id &&
+        messageData.roomId === activeRoom.id
+      ) {
         setMessages((prev) => {
           // Check if message already exists to prevent duplicates
           const exists = prev.some(
@@ -115,21 +179,54 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
                 ) < 1000)
           );
           if (exists) return prev;
-          
+
           // Check if current user is mentioned
-          const mentionedUsers = messageData.mentioned_users ? JSON.parse(messageData.mentioned_users) : [];
+          const mentionedUsers = messageData.mentioned_users
+            ? JSON.parse(messageData.mentioned_users)
+            : [];
           const isMentioned = mentionedUsers.includes(currentUser.id);
-          
-          // Play appropriate notification sound
+
+          // Play appropriate notification sound and show web notification
           if (isMentioned) {
             playMentionSound();
+
+            // Show push notification for mentions
+            notificationManager.showMentionNotification({
+              title: `New mention from ${messageData.username}`,
+              body: messageData.message,
+              senderName: messageData.username,
+              senderId: messageData.senderId,
+              mentionId: messageData.id,
+            });
           } else {
             playNotificationSound();
+
+            // Show simple notification for regular messages
+            notificationManager.showSimpleNotification(
+              `New message from ${messageData.username}`,
+              messageData.message
+            );
           }
-          
+
           return [...prev, messageData];
         });
       }
+    });
+
+    channel.subscribe("thread-update", (message) => {
+      const { parentMessageId, newReplyCount, lastReplyTimestamp } = message.data;
+      
+      setMessages((prev) => 
+        prev.map((msg) => 
+          msg.id === parentMessageId 
+            ? { 
+                ...msg, 
+                thread_count: newReplyCount,
+                last_thread_timestamp: lastReplyTimestamp 
+              }
+            : msg
+        )
+      );
     });
 
     channel.subscribe("typing", (message) => {
@@ -149,6 +246,10 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
     });
 
     return () => {
+      console.log(
+        "Cleanup: Unsubscribing from channel:",
+        `chat-${activeRoom.id}`
+      );
       channel.unsubscribe();
     };
   };
@@ -165,6 +266,11 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
       // Extract mentioned users
       const mentionedUserIds = extractMentionedUserIds(messageText, allUsers);
 
+      console.log("=== SEND MESSAGE DEBUG ===");
+      console.log("Message text:", messageText);
+      console.log("All users for mention matching:", allUsers);
+      console.log("Extracted mentioned user IDs:", mentionedUserIds);
+
       const response = await fetch("/api/messages", {
         method: "POST",
         headers: {
@@ -174,7 +280,7 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
           senderId: currentUser.id,
           message: messageText,
           roomId: activeRoom.id,
-          mentionedUsers: mentionedUserIds
+          mentionedUsers: mentionedUserIds,
         }),
       });
 
@@ -197,7 +303,15 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
           return [...prev, data.message];
         });
 
-        // Broadcast to others via Ably
+        // Broadcast to others via Ably - ensure message has correct roomId
+        console.log(
+          "Broadcasting message to channel:",
+          `chat-${activeRoom.id}`
+        );
+        console.log("Message being broadcasted:", data.message);
+        console.log("Message roomId:", data.message.roomId);
+        console.log("Active room ID:", activeRoom.id);
+
         const channel = ably.channels.get(`chat-${activeRoom.id}`);
         channel.publish("message", data.message);
       }
@@ -209,34 +323,42 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    const cursorPosition = e.target.selectionStart || 0;
     setNewMessage(value);
 
-    // Check for mention trigger (@)
-    const textBeforeCursor = value.substring(0, cursorPosition);
-    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
-    
-    if (lastAtIndex !== -1) {
-      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
-      // Check if there's no space after @ (indicating potential mention)
-      if (!textAfterAt.includes(' ') && textAfterAt.length <= 20) {
-        setMentionSearchTerm(textAfterAt);
-        setMentionStartIndex(lastAtIndex);
-        setShowMentionPicker(true);
-        
-        // Calculate picker position
-        const inputElement = e.target;
-        const rect = inputElement.getBoundingClientRect();
-        setMentionPickerPosition({
-          x: rect.left,
-          y: rect.top
-        });
+    // Clear existing mention timeout
+    if (mentionTimeoutRef.current) {
+      clearTimeout(mentionTimeoutRef.current);
+    }
+
+    // Debounce mention detection for better performance
+    mentionTimeoutRef.current = setTimeout(() => {
+      // Check for @ mention trigger
+      const lastAtIndex = value.lastIndexOf("@");
+
+      if (lastAtIndex !== -1) {
+        const textAfterAt = value.substring(lastAtIndex + 1);
+
+        // Show picker if we're typing after @ and there's no space
+        if (!textAfterAt.includes(" ") && textAfterAt.length <= 20) {
+          setMentionSearchTerm(textAfterAt);
+          setMentionStartIndex(lastAtIndex);
+          setShowMentionPicker(true);
+
+          // Calculate picker position - show ABOVE input
+          const inputElement = e.target;
+          const rect = inputElement.getBoundingClientRect();
+
+          setMentionPickerPosition({
+            x: rect.left,
+            y: rect.top - 200, // Position ABOVE the input with enough space
+          });
+        } else {
+          setShowMentionPicker(false);
+        }
       } else {
         setShowMentionPicker(false);
       }
-    } else {
-      setShowMentionPicker(false);
-    }
+    }, 100); // 100ms debounce
 
     if (!currentUser || !activeRoom) return;
 
@@ -260,22 +382,28 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
 
   const handleMentionSelect = (user: User) => {
     if (mentionStartIndex === -1) return;
-    
+
     const beforeMention = newMessage.substring(0, mentionStartIndex);
-    const afterMention = newMessage.substring(mentionStartIndex + 1 + mentionSearchTerm.length);
+    const afterMention = newMessage.substring(
+      mentionStartIndex + 1 + mentionSearchTerm.length
+    );
     const newValue = beforeMention + `@${user.username} ` + afterMention;
-    
+
     setNewMessage(newValue);
     setShowMentionPicker(false);
     setMentionStartIndex(-1);
     setMentionSearchTerm("");
-    
+
     // Refocus input
     setTimeout(() => {
       if (inputRef.current) {
         inputRef.current.focus();
-        const newCursorPosition = beforeMention.length + user.username.length + 2; // +2 for @ and space
-        inputRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
+        const newCursorPosition =
+          beforeMention.length + user.username.length + 2; // +2 for @ and space
+        inputRef.current.setSelectionRange(
+          newCursorPosition,
+          newCursorPosition
+        );
       }
     }, 0);
   };
@@ -450,20 +578,49 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
   }
 
   return (
-    <DragDropZone
-      onFileSelect={handleDraggedFileSelect}
-      className="flex-1 flex flex-col bg-white relative"
-    >
-      <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center space-x-3">
-          <Hash className="w-5 h-5 text-gray-600" />
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">
-              {activeRoom.name}
-            </h1>
-            {activeRoom.description && (
-              <p className="text-sm text-gray-500">{activeRoom.description}</p>
+    <div className="h-full flex">
+      {/* Main Chat Area */}
+      <div className={`flex flex-col bg-white ${activeThread ? "w-1/2" : "w-full"} transition-all duration-300`}>
+        <DragDropZone
+          onFileSelect={handleDraggedFileSelect}
+          className="h-full flex flex-col bg-white relative"
+        >
+      <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex-shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <Hash className="w-5 h-5 text-gray-600" />
+            <div>
+              <h1 className="text-xl font-semibold text-gray-900">
+                {activeRoom.name}
+              </h1>
+              {activeRoom.description && (
+                <p className="text-sm text-gray-500">
+                  {activeRoom.description}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center space-x-4">
+            {notificationPermission === "denied" && (
+              <button
+                onClick={handleEnableNotifications}
+                className="text-xs bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600"
+              >
+                🚫 Enable Notifications
+              </button>
             )}
+            {notificationPermission === "default" && (
+              <button
+                onClick={handleEnableNotifications}
+                className="text-xs bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
+              >
+                Allow Notifications
+              </button>
+            )}
+            <div className="text-sm text-gray-500">
+              {currentUser.username}
+              {notificationPermission === "granted" && " 🔔"}
+            </div>
           </div>
         </div>
       </header>
@@ -483,44 +640,113 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
               messages.map((msg, index) => (
                 <div
                   key={`room-${msg.id}-${msg.senderId}-${msg.roomId}-${index}`}
-                  className={`flex ${
-                    msg.senderId === currentUser?.id
-                      ? "justify-end"
-                      : "justify-start"
-                  }`}
+                  className="flex items-start space-x-3 justify-start"
                 >
-                  <div
-                    className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                      msg.senderId === currentUser?.id
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-100 text-gray-900"
-                    }`}
-                  >
-                    <div className="text-xs opacity-70 mb-1">
-                      {msg.username}
-                    </div>
-                    {msg.file_url ? (
-                      <div className="mb-2">
-                        <FileMessage
-                          fileName={msg.file_name!}
-                          fileUrl={msg.file_url}
-                          fileType={msg.file_type!}
-                          fileSize={msg.file_size!}
-                        />
-                        {msg.message && (
-                          <div className="mt-2 whitespace-pre-wrap break-words">
-                            {highlightMentions({ text: msg.message })}
-                          </div>
-                        )}
-                      </div>
+                  {/* Avatar - immer links */}
+                  <div className="flex-shrink-0">
+                    {msg.avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        className="w-8 h-8 rounded-full"
+                        src={msg.avatar_url}
+                        alt={msg.username}
+                      />
                     ) : (
-                      <div className="whitespace-pre-wrap break-words">
-                        {highlightMentions({ text: msg.message })}
+                      <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
+                        <span className="text-xs font-medium text-gray-600">
+                          {msg.username.charAt(0).toUpperCase()}
+                        </span>
                       </div>
                     )}
-                    <div className="text-xs opacity-50 mt-1">
-                      {new Date(msg.timestamp).toLocaleTimeString()}
+                  </div>
+
+                  {/* Message Content - immer rechts vom Avatar */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline space-x-2 mb-1">
+                      <span className="text-sm font-medium text-gray-900">
+                        {msg.username}
+                      </span>
+                      {msg.senderId === currentUser?.id && (
+                        <span className="text-xs text-gray-500">(You)</span>
+                      )}
+                      <span className="text-xs text-gray-500">
+                        {new Date(msg.timestamp).toLocaleTimeString()}
+                      </span>
                     </div>
+
+                    <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 shadow-sm">
+                      {msg.file_url ? (
+                        <div className="mb-2">
+                          <FileMessage
+                            fileName={msg.file_name!}
+                            fileUrl={msg.file_url}
+                            fileType={msg.file_type!}
+                            fileSize={msg.file_size!}
+                          />
+                          {msg.message && (
+                            <div className="mt-2">
+                              <div className="whitespace-pre-wrap break-words text-gray-900 mb-2">
+                                {highlightMentions({
+                                  text: msg.message,
+                                  allUsers,
+                                })}
+                              </div>
+                              {/* YouTube Preview */}
+                              {detectYouTubeUrls(msg.message).map((url, index) => (
+                                <YouTubePreview 
+                                  key={`${msg.id}-youtube-${index}`}
+                                  url={url} 
+                                  className="mt-2"
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="whitespace-pre-wrap break-words text-gray-900 mb-2">
+                            {highlightMentions({ text: msg.message, allUsers })}
+                          </div>
+                          {/* YouTube Preview for text-only messages */}
+                          {detectYouTubeUrls(msg.message).map((url, index) => (
+                            <YouTubePreview 
+                              key={`${msg.id}-youtube-${index}`}
+                              url={url} 
+                              className="mt-2"
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Thread Actions - nur für Top-Level-Nachrichten */}
+                    {!msg.parent_message_id && (
+                      <div className="flex items-center space-x-2 mt-2">
+                        <button
+                          onClick={() => setActiveThread(msg)}
+                          className="text-xs text-gray-500 hover:text-blue-600 flex items-center space-x-1 transition-colors"
+                        >
+                          <MessageSquare className="w-3 h-3" />
+                          <span>Reply in thread</span>
+                        </button>
+                        
+                        {(msg.thread_count || 0) > 0 && (
+                          <button
+                            onClick={() => setActiveThread(msg)}
+                            className="text-xs text-blue-600 hover:text-blue-700 flex items-center space-x-1"
+                          >
+                            <span className="font-medium">
+                              {msg.thread_count} {msg.thread_count === 1 ? "reply" : "replies"}
+                            </span>
+                            {msg.last_thread_timestamp && (
+                              <span className="text-gray-500">
+                                • Last reply {new Date(msg.last_thread_timestamp).toLocaleTimeString()}
+                              </span>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -552,7 +778,7 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
 
       <form
         onSubmit={sendMessage}
-        className="border-t border-gray-200 bg-white p-4"
+        className="border-t border-gray-200 bg-white p-4 flex-shrink-0"
       >
         <div className="flex space-x-2 items-end">
           <div className="flex-1 relative">
@@ -583,12 +809,27 @@ export default function ChatArea({ currentUser, activeRoom }: ChatAreaProps) {
 
       {/* Mention Picker */}
       <MentionPicker
-        users={allUsers.filter(user => user.id !== currentUser.id)}
+        users={allUsers.filter((user) => user.id !== currentUser.id)}
         onMentionSelect={handleMentionSelect}
         isVisible={showMentionPicker}
         position={mentionPickerPosition}
         searchTerm={mentionSearchTerm}
       />
-    </DragDropZone>
+        </DragDropZone>
+      </div>
+
+      {/* Thread Panel */}
+      {activeThread && (
+        <div className="w-1/2 h-full">
+          <ThreadArea
+            parentMessage={activeThread}
+            currentUser={currentUser}
+            activeRoom={activeRoom!}
+            allUsers={allUsers}
+            onClose={() => setActiveThread(null)}
+          />
+        </div>
+      )}
+    </div>
   );
 }

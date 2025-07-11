@@ -22,7 +22,9 @@ export async function POST(request: NextRequest) {
     const directMessage = await db.execute({
       sql: `SELECT dm.*, 
             sender.username as senderUsername,
-            receiver.username as receiverUsername
+            receiver.username as receiverUsername,
+            sender.avatar_url as senderAvatarUrl,
+            receiver.avatar_url as receiverAvatarUrl
             FROM direct_messages dm 
             JOIN users sender ON dm.senderId = sender.id
             JOIN users receiver ON dm.receiverId = receiver.id
@@ -55,7 +57,9 @@ export async function GET(request: NextRequest) {
     const messages = await db.execute({
       sql: `SELECT dm.*, 
             sender.username as senderUsername,
-            receiver.username as receiverUsername
+            receiver.username as receiverUsername,
+            sender.avatar_url as senderAvatarUrl,
+            receiver.avatar_url as receiverAvatarUrl
             FROM direct_messages dm 
             JOIN users sender ON dm.senderId = sender.id
             JOIN users receiver ON dm.receiverId = receiver.id

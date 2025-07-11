@@ -10,6 +10,7 @@ export async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
+      role TEXT DEFAULT 'user',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -29,6 +30,49 @@ export async function initializeDatabase() {
       FOREIGN KEY (senderId) REFERENCES users(id)
     );
   `);
+
+  // Migration: Add mentioned_users column if it doesn't exist
+  try {
+    await client.execute(`
+      ALTER TABLE messages ADD COLUMN mentioned_users TEXT;
+    `);
+  } catch {
+    // Column already exists, no action needed
+  }
+
+  // Migration: Add role column to users if it doesn't exist
+  try {
+    await client.execute(`
+      ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user';
+    `);
+  } catch {
+    // Column already exists, no action needed
+  }
+
+  // Migration: Add thread support to messages
+  try {
+    await client.execute(`
+      ALTER TABLE messages ADD COLUMN parent_message_id INTEGER;
+    `);
+  } catch {
+    // Column already exists, no action needed
+  }
+
+  try {
+    await client.execute(`
+      ALTER TABLE messages ADD COLUMN thread_count INTEGER DEFAULT 0;
+    `);
+  } catch {
+    // Column already exists, no action needed
+  }
+
+  try {
+    await client.execute(`
+      ALTER TABLE messages ADD COLUMN last_thread_timestamp DATETIME;
+    `);
+  } catch {
+    // Column already exists, no action needed
+  }
 }
 
 export default client;

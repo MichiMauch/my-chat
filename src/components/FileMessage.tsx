@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from 'next/image';
 import {
   Download,
   FileText,
@@ -59,9 +60,11 @@ export default function FileMessage({
   const renderPreview = () => {
     if (fileType.startsWith("image/")) {
       return (
-        <img
+        <Image
           src={fileUrl}
           alt={fileName}
+          width={300}
+          height={200}
           className="max-w-xs max-h-64 rounded-lg object-contain"
         />
       );
